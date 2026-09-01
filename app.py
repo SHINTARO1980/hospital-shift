@@ -155,18 +155,20 @@ if "schedule_df" in st.session_state:
       key="shift_editor",
   )
 
-  # --- 月間合計集計機能 ---
+  # --- 月間合計集計機能（縦：シフト、横：スタッフ順） ---
   st.header("3. 各スタッフの月間シフト集計")
 
   summary_roles = ROLES + ["希望休"]
-  summary_data = {role: [] for role in summary_roles}
+  summary_data = {staff: [] for staff in STAFF_MEMBERS}
 
   for staff in STAFF_MEMBERS:
     staff_counts = edited_df[staff].value_counts()
     for role in summary_roles:
-      summary_data[role].append(int(staff_counts.get(role, 0)))
+      summary_data[staff].append(int(staff_counts.get(role, 0)))
 
-  df_summary = pd.DataFrame(summary_data, index=STAFF_MEMBERS)
+  df_summary = pd.DataFrame(
+      summary_data, index=pd.Index(summary_roles, name="シフト")
+  )
   st.dataframe(df_summary, use_container_width=True)
 
   # CSVダウンロード機能

@@ -11,92 +11,154 @@ st.title("🏥 病院勤務表 自動作成ツール")
 
 # 2026年 祝日定義
 HOLIDAYS_2026 = [
-    (1, 1), (1, 12), (2, 11), (2, 23), (3, 20), (4, 29),
-    (5, 3), (5, 4), (5, 5), (5, 6), (7, 20), (8, 11),
-    (9, 21), (9, 22), (9, 23), (10, 12), (11, 3), (11, 23)
+    (1, 1),
+    (1, 12),
+    (2, 11),
+    (2, 23),
+    (3, 20),
+    (4, 29),
+    (5, 3),
+    (5, 4),
+    (5, 5),
+    (5, 6),
+    (7, 20),
+    (8, 11),
+    (9, 21),
+    (9, 22),
+    (9, 23),
+    (10, 12),
+    (11, 3),
+    (11, 23),
 ]
 
 STAFF_MEMBERS = ["濱本", "藤井", "横光", "橋本", "堀内", "三木", "前田", "園田"]
+ROLES = ["カF", "処①", "処②", "AF", "CFF", "OFF", "D", "A", "B"]
+
+# 手動変更時のプルダウン選択肢
+ROLE_OPTIONS = ROLES + ["希望休", "休診", "-"]
+
 
 def parse_days(day_str):
-    days = []
-    if day_str:
-        for d in str(day_str).replace("、", ",").split(","):
-            d = d.strip()
-            if d.isdigit():
-                days.append(int(d))
-    return days
+  days = []
+  if day_str:
+    for d in str(day_str).replace("、", ",").split(","):
+      d = d.strip()
+      if d.isdigit():
+        days.append(int(d))
+  return days
+
 
 # 入力エリア
 st.header("1. 基本設定・希望休の入力")
 col_year, col_month = st.columns(2)
 with col_year:
-    target_year = st.number_input("対象年", value=2026)
+  target_year = st.number_input("対象年", value=2026)
 with col_month:
-    target_month = st.number_input("対象月", min_value=1, max_value=12, value=10)
+  target_month = st.number_input("対象月", min_value=1, max_value=12, value=10)
 
 st.subheader("各スタッフの希望日（カンマ区切りで入力。例: 5, 12）")
 off_days_dict = {}
 
 cols = st.columns(2)
 for idx, staff in enumerate(STAFF_MEMBERS):
-    with cols[idx % 2]:
-        input_str = st.text_input(f"{staff} の希望日", value="")
-        off_days_dict[staff] = parse_days(input_str)
+  with cols[idx % 2]:
+    input_str = st.text_input(f"{staff} の希望日", value="")
+    off_days_dict[staff] = parse_days(input_str)
 
 # 実行ボタン
 if st.button("🚀 勤務表を自動生成する", type="primary"):
-    roles = ["カF", "処①", "処②", "AF", "CFF", "OFF", "D", "A", "B"]
-    _, num_days = calendar.monthrange(target_year, target_month)
-    days = list(range(1, num_days + 1))
+  _, num_days = calendar.monthrange(target_year, target_month)
+  days = list(range(1, num_days + 1))
 
-    prob = LpProblem("Hospital_Shift", LpMinimize)
-    x = LpVariable.dicts("shift", [(s, d, r) for s in STAFF_MEMBERS for d in days for r in roles], cat=LpBinary)
+  prob = LpProblem("Hospital_Shift", LpMinimize)
+  x = LpVariable.dicts(
+      "shift",
+      [(s, d, r)
+       for s in STAFF_MEMBERS
+       for d in days
+       for r in ROLES],
+      cat=LpBinary,
+  )
 
-    for d in days:
-        dt = date(target_year, target_month, d)
-        is_holiday = (target_month, d) in HOLIDAYS_2026 or dt.weekday() == 6
+  for d in days:
+    dt = date(target_year, target_month, d)
+    is_holiday = (target_month, d) in HOLIDAYS_2026 or dt.weekday() == 6
 
-        if is_holiday:
-            for s in STAFF_MEMBERS:
-                for r in roles:
-                    prob += x[(s, d, r)] == 0
-            continue
+    if is_holiday:
+      for s in STAFF_MEMBERS:
+        for r in ROLES:
+          prob += x[(s, d, r)] == 0
+      continue
 
-        for s in STAFF_MEMBERS:
-            if d in off_days_dict.get(s, []):
-                for r in roles:
-                    prob += x[(s, d, r)] == 0
-            else:
-                prob += lpSum([x[(s, d, r)] for r in roles]) == 1
+    for s in STAFF_MEMBERS:
+      if d in off_days_dict.get(s, []):
+        for r in ROLES:
+          prob += x[(s, d, r)] == 0
+      else:
+        prob += lpSum([x[(s, d, r)] for r in ROLES]) == 1
 
-        working_staff = [s for s in STAFF_MEMBERS if d not in off_days_dict.get(s, [])]
-        for r in ["カF", "処①", "処②", "AF", "CFF"]:
-            if len(working_staff) >= 5:
-                prob += lpSum([x[(s, d, r)] for s in working_staff]) >= 1
+    working_staff = [
+        s for s in STAFF_MEMBERS if d not in off_days_dict.get(s, [])
+    ]
+    for r in ["カF", "処①", "処②", "AF", "CFF"]:
+      if len(working_staff) >= 5:
+        prob += lpSum([x[(s, d, r)] for s in working_staff]) >= 1
 
-    prob.solve()
+  prob.solve()
 
-    weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
-    schedule_data = []
+  weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
+  schedule_data = []
 
-    for d in days:
-        dt = date(target_year, target_month, d)
-        w_str = weekdays_jp[dt.weekday()]
-        is_holiday = (target_month, d) in HOLIDAYS_2026 or dt.weekday() == 6
-        
-        row_dict = {"日付": f"{d}日({w_str})"}
-        for s in STAFF_MEMBERS:
-            if is_holiday:
-                row_dict[s] = "休診"
-            elif d in off_days_dict.get(s, []):
-                row_dict[s] = "希望休"
-            else:
-                assigned = [r for r in roles if x[(s, d, r)].varValue == 1]
-                row_dict[s] = assigned[0] if assigned else "-"
-        schedule_data.append(row_dict)
+  for d in days:
+    dt = date(target_year, target_month, d)
+    w_str = weekdays_jp[dt.weekday()]
+    is_holiday = (target_month, d) in HOLIDAYS_2026 or dt.weekday() == 6
 
-    df_out = pd.DataFrame(schedule_data).set_index("日付")
+    row_dict = {"日付": f"{d}日({w_str})"}
+    for s in STAFF_MEMBERS:
+      if is_holiday:
+        row_dict[s] = "休診"
+      elif d in off_days_dict.get(s, []):
+        row_dict[s] = "希望休"
+      else:
+        assigned = [r for r in ROLES if x[(s, d, r)].varValue == 1]
+        row_dict[s] = assigned[0] if assigned else "-"
+    schedule_data.append(row_dict)
 
-    st.success("作成が完了しました！")
-    st.dataframe(df_out, use_container_width=True)
+  df_out = pd.DataFrame(schedule_data).set_index("日付")
+  st.session_state["schedule_df"] = df_out
+  st.success("作成が完了しました！下の表で直接変更・調整ができます。")
+
+# 勤務表が生成されている場合は編集画面を表示
+if "schedule_df" in st.session_state:
+  st.header("2. 勤務表の確認・手動調整")
+  st.info(
+      "💡 変更したいセルをタップ（ダブルタップ）するとプルダウンで勤務を変更できます。"
+  )
+
+  # 全スタッフ列にプルダウン選択を設定
+  column_config = {
+      staff: st.column_config.SelectboxColumn(
+          staff,
+          options=ROLE_OPTIONS,
+          required=True,
+      )
+      for staff in STAFF_MEMBERS
+  }
+
+  # インタラクティブ編集テーブル
+  edited_df = st.data_editor(
+      st.session_state["schedule_df"],
+      column_config=column_config,
+      use_container_width=True,
+      key="shift_editor",
+  )
+
+  # CSVダウンロード機能
+  csv = edited_df.to_csv().encode("utf-8-sig")
+  st.download_button(
+      label="📥 調整後の勤務表（Excel用）をダウンロード",
+      data=csv,
+      file_name=f"勤務表_{target_year}年{target_month}月.csv",
+      mime="text/csv",
+  )

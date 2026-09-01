@@ -34,7 +34,7 @@ HOLIDAYS_2026 = [
 STAFF_MEMBERS = ["濱本", "藤井", "横光", "橋本", "堀内", "三木", "前田", "園田"]
 ROLES = ["カF", "処①", "処②", "AF", "CFF", "OFF", "D", "A", "B"]
 
-# 手動変更時のプルダウン選択肢
+# プルダウン選択肢および合計計算の対象シフト
 ROLE_OPTIONS = ROLES + ["希望休", "休診", "-"]
 
 
@@ -129,11 +129,12 @@ if st.button("🚀 勤務表を自動生成する", type="primary"):
   st.session_state["schedule_df"] = df_out
   st.success("作成が完了しました！下の表で直接変更・調整ができます。")
 
-# 勤務表が生成されている場合は編集画面を表示
+# 勤務表が生成されている場合は編集画面および合計を表示
 if "schedule_df" in st.session_state:
   st.header("2. 勤務表の確認・手動調整")
   st.info(
-      "💡 変更したいセルをタップ（ダブルタップ）するとプルダウンで勤務を変更できます。"
+      "💡"
+      " 変更したいセルをタップ（ダブルタップ）するとプルダウンで勤務を変更できます。"
   )
 
   # 全スタッフ列にプルダウン選択を設定
@@ -153,6 +154,20 @@ if "schedule_df" in st.session_state:
       use_container_width=True,
       key="shift_editor",
   )
+
+  # --- 月間合計集計機能 ---
+  st.header("3. 各スタッフの月間シフト集計")
+
+  summary_roles = ROLES + ["希望休"]
+  summary_data = {role: [] for role in summary_roles}
+
+  for staff in STAFF_MEMBERS:
+    staff_counts = edited_df[staff].value_counts()
+    for role in summary_roles:
+      summary_data[role].append(int(staff_counts.get(role, 0)))
+
+  df_summary = pd.DataFrame(summary_data, index=STAFF_MEMBERS)
+  st.dataframe(df_summary, use_container_width=True)
 
   # CSVダウンロード機能
   csv = edited_df.to_csv().encode("utf-8-sig")

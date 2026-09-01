@@ -34,7 +34,7 @@ HOLIDAYS_2026 = [
 STAFF_MEMBERS = ["濱本", "藤井", "横光", "橋本", "堀内", "三木", "前田", "園田"]
 ROLES = ["カF", "処①", "処②", "AF", "CFF", "OFF", "D", "A", "B"]
 
-# プルダウン選択肢および合計計算の対象シフト
+# プルダウン選択肢
 ROLE_OPTIONS = ROLES + ["希望休", "休診", "-"]
 
 
@@ -70,7 +70,9 @@ if st.button("🚀 勤務表を自動生成する", type="primary"):
   _, num_days = calendar.monthrange(target_year, target_month)
   days = list(range(1, num_days + 1))
 
-  prob = LpProblem("Hospital_Shift", LpMinimize)
+  prob = LpProblem("Hospital_Shift_Fairness", LpMinimize)
+
+  # 変数定義
   x = LpVariable.dicts(
       "shift",
       [(s, d, r)
@@ -80,6 +82,11 @@ if st.button("🚀 勤務表を自動生成する", type="primary"):
       cat=LpBinary,
   )
 
+  # シフト平準化のための変数（最大回数と最小回数の差）
+  max_count = LpVariable.dicts("max_count", ROLES, lowBound=0)
+  min_count = LpVariable.dicts("min_count", ROLES, lowBound=0)
+
+  # 1. 祝日・日曜および希望休制約
   for d in days:
     dt = date(target_year, target_month, d)
     is_holiday = (target_month, d) in HOLIDAYS_2026 or dt.weekday() == 6
@@ -104,6 +111,16 @@ if st.button("🚀 勤務表を自動生成する", type="primary"):
       if len(working_staff) >= 5:
         prob += lpSum([x[(s, d, r)] for s in working_staff]) >= 1
 
+  # 2. 公平性（各シフトの合計回数の平準化）の制約
+  for r in ROLES:
+    for s in STAFF_MEMBERS:
+      staff_role_sum = lpSum([x[(s, d, r)] for d in days])
+      prob += staff_role_sum <= max_count[r]
+      prob += staff_role_sum >= min_count[r]
+
+  # 目的関数：各役割の「最大回数 - 最小回数」の差の合計を最小化する
+  prob += lpSum([max_count[r] - min_count[r] for r in ROLES])
+
   prob.solve()
 
   weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
@@ -127,7 +144,9 @@ if st.button("🚀 勤務表を自動生成する", type="primary"):
 
   df_out = pd.DataFrame(schedule_data).set_index("日付")
   st.session_state["schedule_df"] = df_out
-  st.success("作成が完了しました！下の表で直接変更・調整ができます。")
+  st.success(
+      "平準化ロジックを反映した作成が完了しました！下の表で確認・調整ができます。"
+  )
 
 # 勤務表が生成されている場合は編集画面および合計を表示
 if "schedule_df" in st.session_state:
@@ -137,7 +156,6 @@ if "schedule_df" in st.session_state:
       " 変更したいセルをタップ（ダブルタップ）するとプルダウンで勤務を変更できます。"
   )
 
-  # 全スタッフ列にプルダウン選択を設定
   column_config = {
       staff: st.column_config.SelectboxColumn(
           staff,
@@ -147,7 +165,6 @@ if "schedule_df" in st.session_state:
       for staff in STAFF_MEMBERS
   }
 
-  # インタラクティブ編集テーブル
   edited_df = st.data_editor(
       st.session_state["schedule_df"],
       column_config=column_config,
@@ -155,7 +172,6 @@ if "schedule_df" in st.session_state:
       key="shift_editor",
   )
 
-  # --- 月間合計集計機能（縦：シフト、横：スタッフ順） ---
   st.header("3. 各スタッフの月間シフト集計")
 
   summary_roles = ROLES + ["希望休"]
@@ -171,7 +187,6 @@ if "schedule_df" in st.session_state:
   )
   st.dataframe(df_summary, use_container_width=True)
 
-  # CSVダウンロード機能
   csv = edited_df.to_csv().encode("utf-8-sig")
   st.download_button(
       label="📥 調整後の勤務表（Excel用）をダウンロード",
